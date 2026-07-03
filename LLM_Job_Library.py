@@ -15,6 +15,9 @@ import smtplib
 from email.message import EmailMessage
 import re
 
+load_dotenv()
+Gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
 def extract_job_postings(company, url, text, model="qwen2.5-coder:7b"):
     prompt = f"""
 You are a strict job posting extractor.

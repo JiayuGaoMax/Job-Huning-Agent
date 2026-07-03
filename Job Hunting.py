@@ -14,7 +14,7 @@ from email.message import EmailMessage
 import re
 import json
 from LLM_Job_Library import extract_job_postings, rank_jobs_with_Gemini # type: ignore
-
+from JobData import CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS
 load_dotenv()
 
 # 1. Setup email credentials and configuration
@@ -22,97 +22,10 @@ SENDER_EMAIL = "galaxyjiayu@gmail.com"
 APP_PASSWORD = os.getenv("EMAIL_PASSWORD")  # Your 16-character app password
 RECEIVER_EMAIL = "galaxyjiayu@gmail.com"
 
-UNWANTED_KEYWORDS = [
-    "nurse",
-    "physician",
-    "doctor",
-    "pharmacist",
-    "dentist",
-    "sales",
-    "retail",
-    "cashier",
-    "cook",
-    "chef",
-    "server",
-    "bartender",
-    "cleaner",
-    "labourer",
-    "warehouse",
-    "driver",
-    "security guard",
-    "customer service representative",
-    "customer support",
-    "receptionist",
-    "administrative assistant",
-    "marketing",
-    "communications",
-    "hr",
-    "human resources",
-    "recruiter",
-    "finance",
-    "accountant",
-    "legal",
-]
+
 MODEL = "qwen2.5-coder:7b"
 Gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-career_sites = {
-    "SaskTel": {
-        "url": "https://jobs.sasktel.com/go/Current-Opportunities/2684517/",
-        "method": "requests",
-    },
-    "FCC": {
-        "url": "https://fccfac.wd3.myworkdayjobs.com/en-CA/careers-carrieres",
-        "method": "playwright",
-    },
-    "SaskPower": {"url": "https://jobs.saskpower.com/search/?q=", "method": "requests"},
-    "SaskEnergy": {
-        "url": "https://saskenergy.wd10.myworkdayjobs.com/SaskEnergy",
-        "method": "playwright",
-    },
-    "Government of Saskatchewan": {
-        "url": "https://careers.saskatchewan.ca/#en/sites/CX_1/jobs?lastSelectedFacet=CATEGORIES&selectedCategoriesFacet=300000023968083",
-        "method": "playwright",
-    },
-    "eHealth Saskatchewan": {
-        "url": "https://www.ehealthsask.ca/Careers/Pages/default.aspx",
-        "method": "playwright",
-    },
-    "WCB Saskatchewan": {
-        "url": "https://fa-ewle-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs",
-        "method": "playwright",
-    },
-    "University of Regina": {
-        "url": "https://urcareers.uregina.ca/postings/search?utf8=%E2%9C%93&query=&query_v0_posted_at_date=&435=&225=&query_position_type_id%5B%5D=1&commit=Search",
-        "method": "requests",
-    },  "Saskatchewan Health Authority": {
-        "url": "https://emqk.fa.ca3.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs",
-        "method": "playwright",
-    },
-    "Alberta Blue Cross": {
-        "url": "https://abbluecross.wd3.myworkdayjobs.com/careers",
-        "method": "playwright",
-    },
-    "Enbridge": {
-        "url": "https://enbridge.wd3.myworkdayjobs.com/enbridge_careers",
-        "method": "playwright",
-    },
-    "Canadian Natural Resources": {
-        "url": "https://ehaa.fa.ca2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CNRL-Professional/jobs",
-        "method": "playwright",
-    },
-    "Stantec": {
-        "url": "https://stantec.jobs/jobs/",
-        "method": "playwright",
-    },
-    "Affinity Credit Union": {
-        "url": "https://jobs.dayforcehcm.com/affinity/CANDIDATEPORTAL",
-        "method": "playwright",
-    },
-     "CAASK": {
-        "url": "https://caask.ca/about-caa/careers",
-        "method": "requests",
-    }
-}
+
 
 headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -128,7 +41,7 @@ def load_resume(pdf_path):
     return text
 
 
-resume_text = load_resume(r"C:\Users\Jiayu Gao\source\repos\AI Job Searching\Max_Gao_Resume.pdf")
+resume_text = load_resume(r"Max_Gao_Resume.pdf")
 
 
 def get_html_requests(url):
@@ -274,51 +187,6 @@ def html_to_text(html):
 
     text = soup.get_text("\n", strip=True)
 
-    unwanted_words = [
-        # Cookie banners
-        "cookie",
-        "cookie consent",
-        "accept all cookies",
-        "modify cookie preferences",
-        "privacy",
-        "privacy policy",
-        "cookie policy",
-        # Website navigation
-        "login",
-        "log in",
-        "create account",
-        "sign in",
-        "sign up",
-        "search by keyword",
-        "search by location",
-        "clear",
-        "create alert",
-        "career alerts",
-        "be in the know",
-        # Footer
-        "legal",
-        "terms",
-        "contact us",
-        "all rights reserved",
-        "copyright",
-        "opens in a new tab",
-        "follow us",
-        "linkedin",
-        "youtube",
-        "facebook",
-        "twitter",
-        # Accessibility
-        "skip to main content",
-        # Generic website text
-        "helpful links",
-        "other links",
-        "required cookies",
-        "functional cookies",
-        "enabled",
-        "provider",
-        "description",
-        "confirm my choices",
-    ]
 
     cleaned = []
 
@@ -331,7 +199,7 @@ def html_to_text(html):
         if len(line) < 2:
             continue
 
-        if any(word in line.lower() for word in unwanted_words):
+        if any(word in line.lower() for word in UNWANTED_WEB_WORDS):
             continue
 
         cleaned.append(line)
@@ -396,7 +264,6 @@ def filter_recent_jobs(jobs, days=7):
 start_time = time.perf_counter()
 all_results = ""
 htmltextAllCompany = ""
-Gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 today = datetime.today().date()
 
 def filter_Unwanted_jobs(jobs):
@@ -408,7 +275,7 @@ def filter_Unwanted_jobs(jobs):
             f"{job.get('department','')}"
         ).lower()
 
-        if any(keyword in text for keyword in UNWANTED_KEYWORDS):
+        if any(keyword in text for keyword in UNWANTED_JOB_KEYWORDS):
             continue
 
         filtered.append(job)
@@ -416,7 +283,7 @@ def filter_Unwanted_jobs(jobs):
     return filtered
 
 # Parsing the webpage
-for company, info in career_sites.items():
+for company, info in CAREER_SITES.items():
 
     print(f"\nChecking {company}...")
 
@@ -464,7 +331,7 @@ ultimate_summary = rank_jobs_with_Gemini(
 )
 
 msg = EmailMessage()
-msg["Subject"] = "Automated Email from Python"
+msg["Subject"] = "Job Hunting Report"
 msg["From"] = SENDER_EMAIL
 msg["To"] = RECEIVER_EMAIL
 msg.set_content(ultimate_summary)
