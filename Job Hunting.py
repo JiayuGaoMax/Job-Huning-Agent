@@ -261,10 +261,7 @@ def filter_recent_jobs(jobs, days=7):
 
     return filtered
 
-start_time = time.perf_counter()
-all_results = ""
-htmltextAllCompany = ""
-today = datetime.today().date()
+
 
 def filter_Unwanted_jobs(jobs):
     filtered = []
@@ -281,6 +278,11 @@ def filter_Unwanted_jobs(jobs):
         filtered.append(job)
 
     return filtered
+
+start_time = time.perf_counter()
+all_results = ""
+htmltextAllCompany = ""
+today = datetime.today().date()
 
 # Parsing the webpage
 for company, info in CAREER_SITES.items():
@@ -309,6 +311,9 @@ for company, info in CAREER_SITES.items():
         all_results += f"\n\n========== {company} ==========\n"
         all_results += f"Error checking {company}: {e}"
 
+
+save_report(htmltextAllCompany, "PostExtractHTMLText.md")
+save_report(all_results, "LocalLLMExtractJob.md")
 alljJobsJson=parse_jobs(all_results)
 alljJobsJson=filter_Unwanted_jobs(alljJobsJson)
 

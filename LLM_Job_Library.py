@@ -50,19 +50,25 @@ If a field is missing, write "Not found" on that field.
 Career page text:
 {text}
 """
+    try:
+        response = chat(
+            model=model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            options={
+                "temperature": 0,
+                "num_ctx": 16384
+            }
+        )
+        return response.message.content
+    except Exception as e:
+        print(f"Error during job extraction: {e}")
+        return f"# Job Extraction Failed\n\nError: {e}"
+    
 
-    response = chat(
-        model=model,
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
-    options={
-        "temperature": 0,
-        "num_ctx": 16384
-    }
-    )
 
-    return response.message.content
+
 
 
 
