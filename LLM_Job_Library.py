@@ -18,7 +18,14 @@ import re
 load_dotenv()
 Gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-def extract_job_postings(company, url, text, model="qwen2.5-coder:7b"):
+def extract_job_postings(
+    company,
+    url,
+    text,
+    model="qwen2.5-coder:7b",
+    max_retries=3,
+    retry_delay=2
+):
     prompt = f"""
 You are a strict job posting extractor.
 
@@ -50,24 +57,63 @@ If a field is missing, write "Not found" on that field.
 Career page text:
 {text}
 """
-    try:
-        response = chat(
-            model=model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            options={
-                "temperature": 0,
-                "num_ctx": 16384
-            }
-        )
-        return response.message.content
-    except Exception as e:
-        print(f"Error during job extraction: {e}")
-        return f"# Job Extraction Failed\n\nError: {e}"
-    
 
+    last_error = None
 
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(
+                f"Extracting jobs from {company} "
+                f"(attempt {attempt}/{max_retries})"
+            )
+
+            response = chat(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                options={
+                    "temperature": 0,
+                    "num_ctx": 16384
+                }
+            )
+
+            result = response.message.content.strip()
+
+            if not result:
+                raise ValueError("The model returned an empty response.")
+
+            print(f"Job extraction completed for {company}.")
+            return result
+
+        except Exception as e:
+            last_error = e
+
+            print(
+                f"Job extraction attempt {attempt} failed "
+                f"for {company}: {e}"
+            )
+
+            if attempt < max_retries:
+                wait_time = retry_delay * (2 ** (attempt - 1))
+
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+
+    print(
+        f"Job extraction failed for {company} "
+        f"after {max_retries} attempts."
+    )
+
+    return (
+        "# Job Extraction Failed\n\n"
+        f"Company: {company}\n\n"
+        f"URL: {url}\n\n"
+        f"Error: {last_error}"
+    )
 
 
 

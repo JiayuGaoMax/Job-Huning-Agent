@@ -23,7 +23,6 @@ APP_PASSWORD = os.getenv("EMAIL_PASSWORD")  # Your 16-character app password
 RECEIVER_EMAIL = "galaxyjiayu@gmail.com"
 
 
-MODEL = "qwen2.5-coder:7b"
 Gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -211,34 +210,38 @@ def html_to_text(html):
 def parse_jobs(text):
     jobs = []
 
-    # Split at lines like "1. Company:", "2. Company:", etc.
-    blocks = re.split(r"\n(?=\d+\.\s+Company:)", text.strip())
+    blocks = re.split(
+        r"(?=Company\s*:)",
+        text,
+        flags=re.IGNORECASE
+    )
 
     for block in blocks:
-        job = {}
+        if not re.search(r"Company\s*:", block, re.IGNORECASE):
+            continue
 
-        for line in block.splitlines():
-            line = line.strip()
+        def get_field(label):
+            match = re.search(
+                rf"^{re.escape(label)}\s*:\s*(.*)$",
+                block,
+                flags=re.IGNORECASE | re.MULTILINE
+            )
 
-            if line.startswith(tuple(str(i) for i in range(10))) and "Company:" in line:
-                job["company"] = line.split("Company:", 1)[1].strip()
+            if match:
+                return match.group(1).strip()
 
-            elif line.startswith("Job Title:"):
-                job["title"] = line.split(":", 1)[1].strip()
+            return "Not found"
 
-            elif line.startswith("Location:"):
-                job["location"] = line.split(":", 1)[1].strip()
+        job = {
+            "company": get_field("Company"),
+            "title": get_field("Job Title"),
+            "location": get_field("Location"),
+            "posting_date": get_field("Posting Date"),
+            "department": get_field("Department"),
+            "url": get_field("Job URL")
+        }
 
-            elif line.startswith("Posting Date:"):
-                job["posting_date"] = line.split(":", 1)[1].strip()
-
-            elif line.startswith("Department:"):
-                job["department"] = line.split(":", 1)[1].strip()
-
-            elif line.startswith("Job URL:"):
-                job["url"] = line.split(":", 1)[1].strip()
-
-        if job:
+        if job["title"] != "Not found":
             jobs.append(job)
 
     return jobs
@@ -298,11 +301,23 @@ for company, info in CAREER_SITES.items():
             raise ValueError("Unknown method")
 
         text = html_to_text(html)
-        htmltextAllCompany += text
+
+        htmltextAllCompany += (
+            f"\n\n"
+            f"{'=' * 80}\n"
+            f"COMPANY: {company}\n"
+            f"CAREER PAGE: {info['url']}\n"
+            f"{'=' * 80}\n\n"
+            f"{text}\n"
+            f"\n{'-' * 80}\n"
+            f"END OF {company}\n"
+            f"{'-' * 80}\n"
+        )
+
         print(f"Extracted {len(text)} characters from {company}")
         # extracting job using LLM
         result = extract_job_postings(
-            company=company, url=info["url"], text=text, model="llama3.1:8b"
+            company=company, url=info["url"], text=text, model="gemma3:12b"
         )
 
         all_results += f"\n\n========== {company} ==========\n"
@@ -315,8 +330,9 @@ for company, info in CAREER_SITES.items():
 save_report(htmltextAllCompany, "PostExtractHTMLText.md")
 save_report(all_results, "LocalLLMExtractJob.md")
 alljJobsJson=parse_jobs(all_results)
-alljJobsJson=filter_Unwanted_jobs(alljJobsJson)
 
+save_report(str(alljJobsJson), "FilteredJobList.md")
+alljJobsJson=filter_Unwanted_jobs(alljJobsJson)
 for job in alljJobsJson:
     job["posting_date_raw"] = job.get("posting_date")
     job["posting_date"] = normalize_date_simple(job.get("posting_date", ""), today)
