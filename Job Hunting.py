@@ -49,78 +49,85 @@ def get_html_requests(url):
     return response.text
 
 
-def get_html_playwright(url: str, timeout: int = 60000) -> str:
-    """
-    General Playwright scraper for dynamic career pages.
-    Works better for Workday, Oracle, Teamtailor, Lever, UKG, and custom JS sites.
-    Returns final rendered HTML.
-    """
+def get_html_playwright(url: str) -> str:
+    print(f"  Starting Playwright: {url}")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-            ],
+    with sync_playwright() as playwright:
+        print("  Launching Chromium...")
+
+        browser = playwright.chromium.launch(
+            headless=True
         )
-
-        context = browser.new_context(
-            viewport={"width": 1600, "height": 1200},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-        )
-
-        page = context.new_page()
 
         try:
-            page.goto(url, wait_until="networkidle", timeout=timeout)
+            page = browser.new_page(
+                viewport={
+                    "width": 1920,
+                    "height": 1080,
+                },
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+            )
 
-            # Try to let dynamic content load
+            page.set_default_timeout(60_000)
+            page.set_default_navigation_timeout(120_000)
+
+            print("  Opening career page...")
+
+            response = page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=120_000,
+            )
+
+            if response:
+                print(f"  HTTP status: {response.status}")
+            else:
+                print("  No navigation response received.")
+
+            # Allow JavaScript job systems to render.
+            page.wait_for_timeout(8_000)
+
             try:
-                page.wait_for_load_state("networkidle", timeout=15000)
-            except PlaywrightTimeoutError:
-                pass
+                page.wait_for_load_state(
+                    "networkidle",
+                    timeout=20_000,
+                )
+            except Exception:
+                print(
+                    "  Network did not become idle; "
+                    "continuing with rendered page."
+                )
 
-            page.wait_for_timeout(3000)
-
-            # Scroll to trigger lazy-loaded jobs
-            for _ in range(5):
-                page.mouse.wheel(0, 2000)
-                page.wait_for_timeout(1000)
-
-            # Try common job-card selectors, but don't fail if absent
-            selectors = [
-                "a[href*='job']",
-                "a[href*='jobs']",
-                "a[href*='careers']",
-                "[data-automation-id]",
-                "[data-testid]",
-                ".job",
-                ".jobs",
-                ".posting",
-                ".opening",
-                "article",
-                "li",
-            ]
-
-            for selector in selectors:
-                try:
-                    if page.locator(selector).count() > 0:
-                        page.wait_for_timeout(1000)
-                        break
-                except Exception:
-                    pass
+            print(f"  Final URL: {page.url}")
+            print(f"  Page title: {page.title()}")
 
             html = page.content()
+            body_text = page.locator("body").inner_text()
+
+            print(f"  Captured HTML: {len(html):,} characters")
+            print(f"  Visible text: {len(body_text):,} characters")
+
+            if len(body_text.strip()) < 100:
+                raise RuntimeError(
+                    "Playwright loaded the page, but almost no visible "
+                    "text was returned. The site may be blocking automation, "
+                    "using an iframe, or loading jobs through another API."
+                )
+
             return html
 
+        except Exception as error:
+            print(
+                f"  PLAYWRIGHT FAILED: "
+                f"{type(error).__name__}: {error}"
+            )
+            raise
+
         finally:
-            context.close()
             browser.close()
 
 
