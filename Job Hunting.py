@@ -14,7 +14,7 @@ from email.message import EmailMessage
 import re
 import json
 from LLM_Job_Library import extract_job_postings, rank_jobs_with_Gemini # type: ignore
-from JobData import CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS
+from JobData import CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS,PEOPLE, PersonProfile
 load_dotenv()
 
 # 1. Setup email credentials and configuration
@@ -40,7 +40,7 @@ def load_resume(pdf_path):
     return text
 
 
-resume_text = load_resume(r"Max_Gao_Resume.pdf")
+
 
 
 def get_html_requests(url):
@@ -226,6 +226,11 @@ for company, info in CAREER_SITES.items():
         all_results += f"\n\n========== {company} ==========\n"
         all_results += f"Error checking {company}: {e}"
 
+# Load resume for the first person in the list
+if PEOPLE:
+    resume_text = load_resume(rf"{PEOPLE[0].resume_file}")
+else:
+    resume_text = ""
 
 save_report(htmltextAllCompany, "PostExtractHTMLText.md")
 save_report(all_results, "LocalLLMExtractJob.md")

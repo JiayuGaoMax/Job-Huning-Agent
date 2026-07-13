@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from pathlib import Path
+import sys
 CAREER_SITES = {
     "SaskTel": {
         "url": "https://jobs.sasktel.com/go/Current-Opportunities/2684517/",
@@ -54,6 +57,10 @@ CAREER_SITES = {
      "CAASK": {
         "url": "https://caask.ca/about-caa/careers",
         "method": "requests",
+    },
+     "Co-operators": {
+        "url": "https://recruiting.ultipro.com/COO5000COOP/JobBoard/163383cc-cbae-4201-956e-c5e437bbfeb3/?q=&o=postedDateDesc&w=&wc=&we=&wpst=",
+        "method": "playwright",
     }
 }
 
@@ -134,3 +141,42 @@ UNWANTED_WEB_WORDS = [
         "description",
         "confirm my choices",
     ]
+
+def get_app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = get_app_dir()
+OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class PersonProfile:
+    name: str
+    resume_file: str
+    receiver_email: str
+    recent_days: int = 3
+    extractor_model: str = "llama3.1:8b"
+
+
+PEOPLE = [
+    PersonProfile(
+        name="Max Gao",
+        resume_file="Max_Gao_Resume.pdf",
+        receiver_email="galaxyjiayu@gmail.com",
+        recent_days=3,
+        extractor_model="llama3.1:8b",
+    ),
+
+    # Add another person later:
+    # PersonProfile(
+    #     name="Thao Pham",
+    #     resume_file="Thao_Pham_Resume.pdf",
+    #     receiver_email="thao_email@example.com",
+    #     recent_days=3,
+    #     extractor_model="llama3.1:8b",
+    # ),
+]
