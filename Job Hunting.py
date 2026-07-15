@@ -1,6 +1,6 @@
 import requests
 from openai import OpenAI
-
+import traceback 
 from ollama import chat
 import os
 from PlaywrightLib import get_html_playwright,html_to_text
@@ -14,6 +14,7 @@ from email.message import EmailMessage
 import re
 import json
 from LLM_Job_Library import extract_job_postings, rank_jobs_with_Gemini # type: ignore
+from pathlib import Path
 from JobData import CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS,PEOPLE, PersonProfile
 load_dotenv()
 
@@ -182,102 +183,345 @@ def filter_Unwanted_jobs(jobs):
 
     return filtered
 
-start_time = time.perf_counter()
-all_results = ""
-htmltextAllCompany = ""
-today = datetime.today().date()
 
-# Parsing the webpage
-for company, info in CAREER_SITES.items():
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nChecking {company}...")
+
+def safe_folder_name(name: str) -> str:
+    return (
+        name.strip()
+        .replace(" ", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+    )
+
+
+def get_person_output_dir(person: PersonProfile) -> Path:
+    person_dir = OUTPUT_DIR / safe_folder_name(person.name)
+    person_dir.mkdir(parents=True, exist_ok=True)
+    return person_dir
+
+
+def save_person_report(content, person: PersonProfile, filename: str):
+    person_dir = get_person_output_dir(person)
+    file_path = person_dir / filename
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(str(content))
+
+    print(f"Saved {person.name} report to {file_path}")
+    return file_path
+
+
+def send_email_report(subject: str, body: str, receiver_email: str):
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = SENDER_EMAIL
+    msg["To"] = receiver_email
+    msg.set_content(body)
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(SENDER_EMAIL, APP_PASSWORD)
+        server.send_message(msg)
+
+
+def run_one_person_full_report(person: PersonProfile):
+    person_start_time = time.perf_counter()
+    today = datetime.today().date()
+
+    print("\n" + "=" * 80)
+    print(f"STARTING REPORT FOR: {person.name}")
+    print("=" * 80)
+
+    htmltextAllCompany = ""
+    all_results = ""
 
     try:
-        if info["method"] == "requests":
-            html = get_html_requests(info["url"])
-        elif info["method"] == "playwright":
-            html = get_html_playwright(info["url"])
-        else:
-            raise ValueError("Unknown method")
+        resume_path = BASE_DIR / person.resume_file
 
-        text = html_to_text(html,UNWANTED_WEB_WORDS)
+        if not resume_path.exists():
+            raise FileNotFoundError(f"Resume not found: {resume_path}")
 
-        htmltextAllCompany += (
-            f"\n\n"
-            f"{'=' * 80}\n"
-            f"COMPANY: {company}\n"
-            f"CAREER PAGE: {info['url']}\n"
-            f"{'=' * 80}\n\n"
-            f"{text}\n"
-            f"\n{'-' * 80}\n"
-            f"END OF {company}\n"
-            f"{'-' * 80}\n"
+        resume_text = load_resume(str(resume_path))
+
+        save_person_report(
+            f"Resume loaded successfully:\n{resume_path}",
+            person,
+            "ResumeLoaded.txt"
         )
 
-        print(f"Extracted {len(text)} characters from {company}")
-        # extracting job using LLM
-        result = extract_job_postings(
-            company=company, url=info["url"], text=text, model="gemma3:12b"
+        # 1. Go over all websites for this person
+        for company, info in person.career_sites.items():
+            print(f"\nChecking {company} for {person.name}...")
+
+            try:
+                if info["method"] == "requests":
+                    html = get_html_requests(info["url"])
+
+                elif info["method"] == "playwright":
+                    html = get_html_playwright(info["url"])
+
+                else:
+                    raise ValueError(f"Unknown method: {info['method']}")
+
+                text = html_to_text(html, UNWANTED_WEB_WORDS)
+
+                htmltextAllCompany += (
+                    f"\n\n"
+                    f"{'=' * 80}\n"
+                    f"PERSON: {person.name}\n"
+                    f"COMPANY: {company}\n"
+                    f"CAREER PAGE: {info['url']}\n"
+                    f"{'=' * 80}\n\n"
+                    f"{text}\n"
+                    f"\n{'-' * 80}\n"
+                    f"END OF {company}\n"
+                    f"{'-' * 80}\n"
+                )
+
+                print(f"Extracted {len(text)} characters from {company}")
+
+                result = extract_job_postings(
+                    company=company,
+                    url=info["url"],
+                    text=text,
+                    model=person.extractor_model
+                )
+
+                all_results += f"\n\n========== {company} ==========\n"
+                all_results += result
+
+            except Exception as company_error:
+                error_text = (
+                    f"Error checking {company} for {person.name}\n"
+                    f"Error Type: {type(company_error).__name__}\n"
+                    f"Error: {company_error}\n\n"
+                    f"{traceback.format_exc()}"
+                )
+
+                print(error_text)
+
+                all_results += f"\n\n========== {company} ==========\n"
+                all_results += error_text
+
+        # 2. Save raw reports for this person
+        save_person_report(
+            htmltextAllCompany,
+            person,
+            "PostExtractHTMLText.md"
         )
 
-        all_results += f"\n\n========== {company} ==========\n"
-        all_results += result
+        save_person_report(
+            all_results,
+            person,
+            "LocalLLMExtractJob.md"
+        )
+
+        # 3. Parse jobs
+        all_jobs_json = parse_jobs(all_results)
+
+        save_person_report(
+            json.dumps(
+                all_jobs_json,
+                indent=2,
+                ensure_ascii=False,
+                default=str
+            ),
+            person,
+            "AllParsedJobs.json"
+        )
+
+        # 4. Remove unwanted jobs
+        all_jobs_json = filter_Unwanted_jobs(all_jobs_json)
+
+        # 5. Normalize posting dates
+        for job in all_jobs_json:
+            job["posting_date_raw"] = job.get("posting_date")
+            job["posting_date"] = normalize_date_simple(
+                job.get("posting_date", ""),
+                today
+            )
+
+        save_person_report(
+            json.dumps(
+                all_jobs_json,
+                indent=2,
+                ensure_ascii=False,
+                default=str
+            ),
+            person,
+            "FilteredJobList.json"
+        )
+
+        # 6. Keep recent jobs only
+        job_after_post_date_filter_json = filter_recent_jobs(
+            all_jobs_json,
+            person.recent_days
+        )
+
+        job_after_post_date_filter_json_str = json.dumps(
+            job_after_post_date_filter_json,
+            indent=2,
+            ensure_ascii=False,
+            default=str
+        )
+
+        save_person_report(
+            job_after_post_date_filter_json_str,
+            person,
+            "RecentFilteredJobs.json"
+        )
+
+        # 7. Rank jobs against this person's resume
+        print(f"\nRanking jobs for {person.name}...")
+
+        ultimate_summary = rank_jobs_with_Gemini(
+            Gemini_client=Gemini_client,
+            jobs_text=job_after_post_date_filter_json_str,
+            resume_text=resume_text
+        )
+
+        save_person_report(
+            ultimate_summary,
+            person,
+            "ultimate_summary.md"
+        )
+
+        # 8. Send email to this person
+        send_email_report(
+            subject=f"Job Hunting Report - {person.name}",
+            body=ultimate_summary,
+            receiver_email=person.receiver_email
+        )
+
+        elapsed = time.perf_counter() - person_start_time
+
+        status_text = (
+            f"SUCCESS\n"
+            f"Person: {person.name}\n"
+            f"Runtime: {elapsed:.2f} seconds\n"
+            f"Parsed jobs after unwanted filter: {len(all_jobs_json)}\n"
+            f"Recent jobs: {len(job_after_post_date_filter_json)}\n"
+        )
+
+        print(status_text)
+
+        save_person_report(
+            status_text,
+            person,
+            "run_status.txt"
+        )
+
+        return {
+            "person": person.name,
+            "success": True,
+            "error": None,
+            "runtime_seconds": elapsed,
+            "recent_jobs_count": len(job_after_post_date_filter_json)
+        }
+
+    except Exception as error:
+        elapsed = time.perf_counter() - person_start_time
+
+        error_text = (
+            f"FAILED\n"
+            f"Person: {person.name}\n"
+            f"Runtime: {elapsed:.2f} seconds\n"
+            f"Error Type: {type(error).__name__}\n"
+            f"Error: {error}\n\n"
+            f"{traceback.format_exc()}"
+        )
+
+        print(error_text)
+
+        save_person_report(
+            error_text,
+            person,
+            "report_error.md"
+        )
+
+        return {
+            "person": person.name,
+            "success": False,
+            "error": str(error),
+            "runtime_seconds": elapsed,
+            "recent_jobs_count": 0
+        }
+
+
+def main():
+    start_time = time.perf_counter()
+
+    print("\n" + "=" * 80)
+    print("DAILY JOB HUNTING REPORT STARTED")
+    print(f"People count: {len(PEOPLE)}")
+    print("=" * 80)
+
+    if not APP_PASSWORD:
+        raise ValueError("EMAIL_PASSWORD is missing from .env file")
+
+    if not os.getenv("GEMINI_API_KEY"):
+        raise ValueError("GEMINI_API_KEY is missing from .env file")
+
+    all_run_results = []
+
+    for person in PEOPLE:
+        result = run_one_person_full_report(person)
+        all_run_results.append(result)
+
+    save_report(
+        json.dumps(
+            all_run_results,
+            indent=2,
+            ensure_ascii=False,
+            default=str
+        ),
+        "AllPeopleRunResults.json"
+    )
+
+    elapsed = time.perf_counter() - start_time
+
+    print("\n" + "=" * 80)
+    print("ALL REPORTS FINISHED")
+    print(f"Total runtime: {elapsed:.2f} seconds")
+    print("=" * 80)
+
+    print(
+        json.dumps(
+            all_run_results,
+            indent=2,
+            ensure_ascii=False,
+            default=str
+        )
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+
     except Exception as e:
-        all_results += f"\n\n========== {company} ==========\n"
-        all_results += f"Error checking {company}: {e}"
+        print("\nPROGRAM FAILED")
+        print(f"Error Type: {type(e).__name__}")
+        print(f"Error: {e}")
+        print(traceback.format_exc())
 
-# Load resume for the first person in the list
-if PEOPLE:
-    resume_text = load_resume(rf"{PEOPLE[0].resume_file}")
-else:
-    resume_text = ""
+        try:
+            save_report(
+                traceback.format_exc(),
+                "program_error.md"
+            )
+        except Exception:
+            pass
 
-save_report(htmltextAllCompany, "PostExtractHTMLText.md")
-save_report(all_results, "LocalLLMExtractJob.md")
-alljJobsJson=parse_jobs(all_results)
-
-save_report(str(alljJobsJson), "FilteredJobList.md")
-alljJobsJson=filter_Unwanted_jobs(alljJobsJson)
-for job in alljJobsJson:
-    job["posting_date_raw"] = job.get("posting_date")
-    job["posting_date"] = normalize_date_simple(job.get("posting_date", ""), today)
-save_report(htmltextAllCompany, "PostExtractHTMLText.md")
-save_report(all_results, "LocalLLMExtractJob.md")
-print("\n\nFINAL RESULTS")  
-jobAfterPostDateFilterJson=filter_recent_jobs(alljJobsJson,3)
-jobAfterPostDateFilterJsonStr=jobs_string = json.dumps(
-    jobAfterPostDateFilterJson,
-    indent=2,
-    ensure_ascii=False,
-    default=str
-)
-
-ultimate_summary = rank_jobs_with_Gemini(
-    Gemini_client=Gemini_client, jobs_text=jobAfterPostDateFilterJsonStr, resume_text=resume_text
-)
-
-msg = EmailMessage()
-msg["Subject"] = "Job Hunting Report"
-msg["From"] = SENDER_EMAIL
-msg["To"] = RECEIVER_EMAIL
-msg.set_content(ultimate_summary)
+        input("\nPress Enter to close...")
 
 
-try:
-
-    for i in range(1):
-
-        # Connect to Gmail's SMTP server (Port 587 for STARTTLS)
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()  # Encrypt the connection securely
-            server.login(SENDER_EMAIL, APP_PASSWORD)  # Authenticate
-            server.send_message(msg)  # Send the constructed message
-
-    print("✅ Email sent successfully!")
-
-except Exception as e:
-    print(f" An error occurred: {e}")
-save_report(all_results, "ultimate_summary.md")
+start_time = time.perf_counter()
 
 end_time = time.perf_counter()
 
