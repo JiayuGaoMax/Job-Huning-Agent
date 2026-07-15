@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from Resume_Customizer import generate_resume_from_url
 
 
-DEFAULT_MODEL = "llama3.1:8b"
+DEFAULT_MODEL = "gemma3:12b"
 
 
 class ResumeWorker(QObject):

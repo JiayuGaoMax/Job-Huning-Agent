@@ -1,3 +1,4 @@
+from asyncio import log
 from pathlib import Path
 from xml.sax.saxutils import escape
 import json
@@ -8,6 +9,7 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from JobData import UNWANTED_WEB_WORDS
+import re
 from reportlab.platypus import (
     HRFlowable,
     KeepTogether,
@@ -1351,11 +1353,28 @@ TARGET JOB POSTING:
 
     return summary.strip()
 
+def clean_json_response(raw_text: str) -> str:
+    raw_text = raw_text.strip()
+
+    # Remove Markdown code fences if model returns ```json ... ```
+    raw_text = re.sub(r"^```json\s*", "", raw_text, flags=re.IGNORECASE)
+    raw_text = re.sub(r"^```\s*", "", raw_text)
+    raw_text = re.sub(r"\s*```$", "", raw_text)
+
+    # Extract only the JSON object if extra text exists
+    start = raw_text.find("{")
+    end = raw_text.rfind("}")
+
+    if start != -1 and end != -1 and end > start:
+        raw_text = raw_text[start:end + 1]
+
+    return raw_text
+
 
 def generate_projects_section(
     master_resume_text: str,
     job_posting_text: str,
-    model: str = "qwen3:8b",
+    model: str = "llama3.1:8b",
 ) -> dict:
     prompt = f"""
 You are a strict resume customization assistant.
@@ -1363,17 +1382,22 @@ You are a strict resume customization assistant.
 Generate ONLY the PROJECTS section.
 
 Rules:
-- Use only projects and facts supported by the master resume.
-- Do not invent technologies, metrics, URLs, or results.
-- Select a maximum of 3 projects.
-- Order projects by relevance to the target job.
-- Include 1 to 3 concise bullet points per project.
-- Begin every bullet with a strong action verb.
-- Do not include placeholder text such as "ready to insert".
 - Return valid JSON only.
-- Do not include Markdown or explanations.
+- Do not include Markdown.
+- Do not include explanations.
+- Do not use trailing commas.
+- Do not use comments.
+- Do not invent technologies, metrics, URLs, or project details.
+- Use only projects and facts supported by the master resume.
+- Use the job posting only to decide relevance.
+- Return exactly 2 projects.
+- Each project must have name, technologies, and bullets.
+- Each bullet must be a normal JSON string.
+- Do not use quotation marks inside bullet text unless escaped.
+- Do not include placeholder text like "ready to insert".
+- After the second project, close the projects array and close the JSON object.
 
-Return exactly this structure:
+Return exactly this JSON structure:
 
 {{
   "projects": [
@@ -1402,11 +1426,45 @@ TARGET JOB POSTING:
         ],
         format="json",
         options={
-            "temperature": 0.2,
+            "temperature": 0.0,
+            "num_predict": 2048,
+            "num_ctx": 8192,
+
         },
     )
 
-    return json.loads(response.message.content)
+    raw_response = response.message.content
+
+    try:
+        cleaned_response = clean_json_response(raw_response)
+        data = json.loads(cleaned_response)
+
+    except json.JSONDecodeError as exc:
+        print("PROJECTS RAW LLM RESPONSE:")
+        print(raw_response)
+
+        with open(
+            "bad_projects_response.txt",
+            "w",
+            encoding="utf-8",
+        ) as file:
+            file.write(raw_response)
+
+        raise ValueError(
+            "Project section returned invalid JSON. "
+            "Raw response saved to bad_projects_response.txt"
+        ) from exc
+
+    if "projects" not in data:
+        raise ValueError(
+            "Missing 'projects' key:\n"
+            + json.dumps(data, indent=2, ensure_ascii=False)
+        )
+
+    if not isinstance(data["projects"], list):
+        raise ValueError("'projects' must be a list.")
+
+    return data
 
 
 def summarize_job_posting(
@@ -1607,15 +1665,18 @@ def generate_resume_from_url(
         model=model,
     )
 
-    resume_data["projects"] = projects_result["projects"]
-
-    log("Projects:")
+    log("Project Json result:")
+    
     log(json.dumps(
         resume_data["projects"],
         indent=2,
         ensure_ascii=False,
     ))
     log("")
+    resume_data["projects"] = projects_result["projects"]
+
+    log("Projects:")
+    
 
     log("Step 10: Generating PDF...")
     output_path = generate_resume_pdf(
@@ -1632,19 +1693,19 @@ def main():
     webpagehtml = get_html_playwright("https://fccfac.wd3.myworkdayjobs.com/en-US/careers-carrieres/details/Product-Owner--Cyber-Security_R-1008647?id=R-1008647")
     webpage_text = html_to_text(webpagehtml,UNWANTED_WEB_WORDS)
     print(webpage_text)
-    jobinformation = summarize_job_posting(webpage_text=webpage_text, model="llama3.1:8b")
+    jobinformation = summarize_job_posting(webpage_text=webpage_text, model="gemma3:12b")
     master_resume_text = load_resume(r"Max_Gao_Master_Resume.pdf")
     resume_data["professional_summary"] = generate_professional_summary(
         master_resume_text=master_resume_text,
         job_posting_text=jobinformation,
-        model="llama3.1:8b"
+        model="gemma3:12b"
     )
     print(json.dumps(resume_data["professional_summary"], indent=2))
-    resume_data["experience"] = generate_experience_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="llama3.1:8b")["experience"]
+    resume_data["experience"] = generate_experience_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")["experience"]
     print(json.dumps(resume_data["experience"], indent=2))
-    resume_data["skills"] = generate_skills_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="llama3.1:8b")
+    resume_data["skills"] = generate_skills_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")
     print(json.dumps(resume_data["skills"], indent=2))
-    resume_data["projects"] = generate_projects_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="llama3.1:8b")["projects"]
+    resume_data["projects"] = generate_projects_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")["projects"]
     print(json.dumps(resume_data["projects"], indent=2))
     output_path = generate_resume_pdf(
         resume_data=resume_data,
