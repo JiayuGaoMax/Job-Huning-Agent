@@ -1152,6 +1152,98 @@ def sample_resume_data() -> dict:
         },
     }
 
+def generate_headline_section(
+    master_resume_text: str,
+    job_posting_text: str,
+    model: str = "llama3.1:8b",
+) -> dict:
+    prompt = f"""
+You are a strict resume customization assistant.
+
+Generate ONLY the resume HEADLINE section.
+
+The headline is the short line under the candidate's name.
+
+Rules:
+- Tailor the headline to the target job posting.
+- Use only skills, roles, and experience clearly supported by the master resume.
+- Do not invent technologies, tools, certifications, job titles, or industries.
+- Keep it short: 6 to 12 words.
+- Use professional resume headline style.
+- Use vertical bars to separate themes.
+- Do not use a full sentence.
+- Do not use first person.
+- Do not include location, email, phone number, or contact details.
+- Return valid JSON only.
+- Do not include Markdown or explanations.
+
+Good examples:
+
+For a data developer job:
+{{
+  "headline": "Data Developer | SQL | Reporting | Enterprise Data Solutions"
+}}
+
+For a software developer job:
+{{
+  "headline": "Software Developer | .NET | SQL | Enterprise Applications"
+}}
+
+For a technical analyst job:
+{{
+  "headline": "Technical Analyst | Business Systems | Production Support"
+}}
+
+For an AI automation job:
+{{
+  "headline": "AI Automation Developer | Python | Local LLM Workflows"
+}}
+
+Return exactly this JSON structure:
+
+{{
+  "headline": ""
+}}
+
+MASTER RESUME:
+{master_resume_text}
+
+TARGET JOB POSTING:
+{job_posting_text}
+"""
+
+    response = chat(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        format="json",
+        options={
+            "temperature": 0.2,
+        },
+    )
+
+    content = response["message"]["content"]
+
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise ValueError(
+            f"Model returned invalid JSON:\n{content}"
+        ) from error
+
+    if "headline" not in result:
+        raise ValueError(
+            f"Missing 'headline' key:\n{content}"
+        )
+
+    headline = result["headline"]
+
+    if not isinstance(headline, str) or not headline.strip():
+        raise ValueError("Headline is empty or invalid.")
+
+    return {
+        "headline": headline.strip()
+    }
+
 def generate_experience_section(
     master_resume_text: str,
     job_posting_text: str,
@@ -1611,7 +1703,20 @@ def generate_resume_from_url(
     if not master_resume_text.strip():
         raise ValueError("Master resume text is empty.")
 
-    log("Step 6: Generating professional summary...")
+    log("Step 6: Generating headline...")
+    headline_result = generate_headline_section(
+        master_resume_text=master_resume_text,
+        job_posting_text=job_posting_text,
+        model=model,
+    )
+
+    resume_data["headline"] = headline_result["headline"]
+
+    log("Headline:")
+    log(resume_data["headline"])
+    log("")
+
+    log("Step 7: Generating professional summary...")
     resume_data["professional_summary"] = generate_professional_summary(
         master_resume_text=master_resume_text,
         job_posting_text=job_posting_text,
@@ -1619,14 +1724,10 @@ def generate_resume_from_url(
     )
 
     log("Professional summary:")
-    log(json.dumps(
-        resume_data["professional_summary"],
-        indent=2,
-        ensure_ascii=False,
-    ))
+    log(resume_data["professional_summary"])
     log("")
 
-    log("Step 7: Generating experience section...")
+    log("Step 8: Generating experience section...")
     experience_result = generate_experience_section(
         master_resume_text=master_resume_text,
         job_posting_text=job_posting_text,
@@ -1643,7 +1744,7 @@ def generate_resume_from_url(
     ))
     log("")
 
-    log("Step 8: Generating skills section...")
+    log("Step 9: Generating skills section...")
     resume_data["skills"] = generate_skills_section(
         master_resume_text=master_resume_text,
         job_posting_text=job_posting_text,
@@ -1658,27 +1759,24 @@ def generate_resume_from_url(
     ))
     log("")
 
-    log("Step 9: Generating projects section...")
+    log("Step 10: Generating projects section...")
     projects_result = generate_projects_section(
         master_resume_text=master_resume_text,
         job_posting_text=job_posting_text,
         model=model,
     )
 
-    log("Project Json result:")
-    
+    resume_data["projects"] = projects_result["projects"]
+
+    log("Projects:")
     log(json.dumps(
         resume_data["projects"],
         indent=2,
         ensure_ascii=False,
     ))
     log("")
-    resume_data["projects"] = projects_result["projects"]
 
-    log("Projects:")
-    
-
-    log("Step 10: Generating PDF...")
+    log("Step 11: Generating PDF...")
     output_path = generate_resume_pdf(
         resume_data=resume_data,
         output_filename=output_filename,
@@ -1687,6 +1785,8 @@ def generate_resume_from_url(
     log(f"Resume PDF created successfully:\n{output_path}")
 
     return str(output_path)
+
+
 def main():
     
     resume_data = sample_resume_data()
