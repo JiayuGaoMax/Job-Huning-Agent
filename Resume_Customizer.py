@@ -367,27 +367,9 @@ def generate_resume_pdf(resume_data: dict, output_filename: str) -> Path:
             bullets = role.get("bullets", [])
 
             if bullets:
-                bullet_list = ListFlowable(
-                    [
-                        ListItem(
-                            Paragraph(
-                                safe_text(bullet),
-                                bullet_style,
-                            ),
-                            leftIndent=8,
-                        )
-                        for bullet in bullets
-                        if bullet
-                    ],
-                    bulletType="bullet",
-                    leftIndent=14,
-                    bulletFontSize=bullet_style.fontSize,
-                    bulletOffsetY=1,
-                    spaceBefore=2,
-                    spaceAfter=4,
-                )
-
-                role_block.append(bullet_list)
+                temp_story = []
+                add_bullet_list(temp_story, bullets, bullet_style)
+                role_block.extend(temp_story)
 
             story.append(KeepTogether(role_block))
 
@@ -1469,43 +1451,87 @@ def generate_projects_section(
     model: str = "llama3.1:8b",
 ) -> dict:
     prompt = f"""
-You are a strict resume customization assistant.
+You are a strict JSON-only resume section generator.
 
-Generate ONLY the PROJECTS section.
+Generate ONLY the PROJECTS section for a customized resume.
 
-Rules:
+SOURCE RULES:
+- The MASTER RESUME is the only source of truth about the candidate.
+- The TARGET JOB POSTING is only used to decide relevance and ordering.
+- Do not copy job requirements into the candidate's experience.
+- Do not invent technologies, metrics, URLs, project details, project names, dates, employers, or achievements.
+- If a detail is not clearly supported by the master resume, omit it.
+
+OUTPUT RULES:
 - Return valid JSON only.
 - Do not include Markdown.
 - Do not include explanations.
+- Do not include comments.
 - Do not use trailing commas.
-- Do not use comments.
-- Do not invent technologies, metrics, URLs, or project details.
-- Use only projects and facts supported by the master resume.
-- Use the job posting only to decide relevance.
 - Return exactly 2 projects.
-- Each project must have name, technologies, and bullets.
-- Each bullet must be a normal JSON string.
-- Do not use quotation marks inside bullet text unless escaped.
+- Do not start a third project.
+- Each project must contain exactly these keys:
+  - "name"
+  - "technologies"
+  - "bullets"
+- "name" must be a string.
+- "technologies" must be a list of strings.
+- "bullets" must be a list of exactly 3 strings.
+- Each bullet must be 15 to 30 words.
+- Each bullet must start with a strong action verb.
+- Do not use quotation marks inside bullet text.
 - Do not include placeholder text like "ready to insert".
-- After the second project, close the projects array and close the JSON object.
+- After the second project, immediately close the projects array and close the JSON object.
+- The response must end with these exact final characters:
+  ]
+}}
 
-Return exactly this JSON structure:
+STYLE RULES:
+- Order projects by relevance to the target job.
+- Prefer projects related to Python, automation, AI, LLMs, JSON, APIs, Playwright, data extraction, PDF generation, or system design when supported.
+- Keep wording professional and resume-ready.
+- Avoid repeating the same idea across bullets.
+
+Return exactly this JSON shape:
 
 {{
   "projects": [
     {{
-      "name": "",
-      "technologies": [],
-      "bullets": []
+      "name": "Project Name",
+      "technologies": [
+        "Technology 1",
+        "Technology 2"
+      ],
+      "bullets": [
+        "Built a resume-ready project bullet using only facts supported by the master resume.",
+        "Implemented another resume-ready project bullet using only facts supported by the master resume.",
+        "Designed another resume-ready project bullet using only facts supported by the master resume."
+      ]
+    }},
+    {{
+      "name": "Project Name",
+      "technologies": [
+        "Technology 1",
+        "Technology 2"
+      ],
+      "bullets": [
+        "Built a resume-ready project bullet using only facts supported by the master resume.",
+        "Implemented another resume-ready project bullet using only facts supported by the master resume.",
+        "Designed another resume-ready project bullet using only facts supported by the master resume."
+      ]
     }}
   ]
 }}
 
 MASTER RESUME:
+<<<MASTER_RESUME_START
 {master_resume_text}
+MASTER_RESUME_END>>>
 
 TARGET JOB POSTING:
+<<<JOB_POSTING_START
 {job_posting_text}
+JOB_POSTING_END>>>
 """
 
     response = chat(
@@ -1520,7 +1546,7 @@ TARGET JOB POSTING:
         options={
             "temperature": 0.0,
             "num_predict": 2048,
-            "num_ctx": 8192,
+            "num_ctx": 16384,
 
         },
     )
