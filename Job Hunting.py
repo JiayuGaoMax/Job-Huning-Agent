@@ -15,7 +15,7 @@ import re
 import json
 from LLM_Job_Library import extract_job_postings, rank_jobs_with_Gemini # type: ignore
 from pathlib import Path
-from JobData import CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS,PEOPLE, PersonProfile
+from JobData import MAX_CAREER_SITES,UNWANTED_JOB_KEYWORDS,UNWANTED_WEB_WORDS,PEOPLE, PersonProfile
 load_dotenv()
 
 # 1. Setup email credentials and configuration
@@ -268,7 +268,7 @@ def run_one_person_full_report(person: PersonProfile):
                 else:
                     raise ValueError(f"Unknown method: {info['method']}")
 
-                text = html_to_text(html, UNWANTED_WEB_WORDS)
+                text = html_to_text(html, UNWANTED_WEB_WORDS, base_url=info["url"])
 
                 htmltextAllCompany += (
                     f"\n\n"

@@ -1,6 +1,8 @@
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 import re
+from urllib.parse import urljoin
+
 def get_html_playwright(url: str) -> str:
     print(f"  Starting Playwright: {url}")
 
@@ -83,7 +85,7 @@ def get_html_playwright(url: str) -> str:
             browser.close()
 
 
-def html_to_text(html,UNWANTED_WEB_WORDS):
+def html_to_text(html, UNWANTED_WEB_WORDS, base_url=None):
     soup = BeautifulSoup(html, "html.parser")
 
     # Remove useless tags
@@ -92,10 +94,48 @@ def html_to_text(html,UNWANTED_WEB_WORDS):
     ):
         tag.decompose()
 
+    # Convert hyperlinks into LLM-readable text BEFORE get_text()
+    for a in soup.find_all("a", href=True):
+        link_text = a.get_text(" ", strip=True)
+        href = a.get("href", "").strip()
+
+        if not href:
+            continue
+
+        # Skip useless links
+        if href.startswith("#"):
+            continue
+
+        if href.lower().startswith("javascript:"):
+            continue
+
+        if href.lower().startswith("mailto:"):
+            continue
+
+        if href.lower().startswith("tel:"):
+            continue
+
+        full_url = urljoin(base_url, href) if base_url else href
+
+        if link_text:
+            replacement = (
+                f"{link_text}\n"
+                f"HYPERLINK: {full_url}"
+            )
+        else:
+            replacement = f"HYPERLINK: {full_url}"
+
+        a.replace_with(replacement)
+
     text = soup.get_text("\n", strip=True)
 
-
     cleaned = []
+
+    unwanted_words = [
+        word.lower().strip()
+        for word in UNWANTED_WEB_WORDS
+        if word.strip()
+    ]
 
     for line in text.splitlines():
         line = re.sub(r"\s+", " ", line).strip()
@@ -106,7 +146,7 @@ def html_to_text(html,UNWANTED_WEB_WORDS):
         if len(line) < 2:
             continue
 
-        if any(word in line.lower() for word in UNWANTED_WEB_WORDS):
+        if any(word in line.lower() for word in unwanted_words):
             continue
 
         cleaned.append(line)
