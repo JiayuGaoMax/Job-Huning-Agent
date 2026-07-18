@@ -207,7 +207,7 @@ For each job:
 
 
 
-def rank_jobs_with_Gemini(Gemini_client, jobs_text, resume_text, max_retries=3):
+def rank_jobs_with_Gemini(Gemini_client, jobs_text, resume_text, max_retries=5):
     prompt = f"""
 You are a strict job ranking agent.
 
@@ -249,7 +249,7 @@ For each job:
     for attempt in range(1, max_retries + 1):
         try:
             response = Gemini_client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 contents=prompt
             )
 

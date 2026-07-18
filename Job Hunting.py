@@ -1,5 +1,4 @@
 import requests
-from openai import OpenAI
 import traceback 
 from ollama import chat
 import os
@@ -376,13 +375,20 @@ def run_one_person_full_report(person: PersonProfile):
             "RecentFilteredJobs.json"
         )
 
-        # 7. Rank jobs against this person's resume
+        # 7. Rank jobs against this person's resume and selection instructions (if any)
         print(f"\nRanking jobs for {person.name}...")
+        resume_text_for_ranking = resume_text
+
+        if person.job_selector_note:
+            resume_text_for_ranking += (
+                "\n\nJOB SELECTION INSTRUCTIONS FOR THIS PERSON:\n"
+                + person.job_selector_note
+            )
 
         ultimate_summary = rank_jobs_with_Gemini(
             Gemini_client=Gemini_client,
             jobs_text=job_after_post_date_filter_json_str,
-            resume_text=resume_text
+            resume_text=resume_text_for_ranking
         )
 
         save_person_report(
@@ -521,10 +527,3 @@ if __name__ == "__main__":
         input("\nPress Enter to close...")
 
 
-start_time = time.perf_counter()
-
-end_time = time.perf_counter()
-
-elapsed = end_time - start_time
-
-print(f"\nTotal runtime: {elapsed:.2f} seconds")
