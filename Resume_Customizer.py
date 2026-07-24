@@ -1134,97 +1134,193 @@ def sample_resume_data() -> dict:
         },
     }
 
+
+
+def summarize_resume_for_job(
+    master_resume_text: str,
+    job_posting_text: str,
+    model: str = "llama3.1:8b",
+) -> str:
+    fallback = """
+TARGET POSITIONING
+- Software Developer with enterprise application, database, reporting, automation, and production support experience.
+
+RELEVANT SUMMARY POINTS
+- 5+ years of experience supporting enterprise applications and business systems.
+- Experience with SQL, Oracle, Python, .NET, VB.NET, Power BI, SSRS, troubleshooting, documentation, and production support.
+- Experience translating business requirements into practical technical solutions.
+
+RELEVANT SKILLS
+- SQL
+- Oracle
+- Python
+- .NET
+- VB.NET
+- Power BI
+- SSRS
+- Requirements Analysis
+- Technical Documentation
+- Production Support
+- Troubleshooting
+- Automation
+
+RELEVANT EXPERIENCE TO EMPHASIZE
+- Canada Life Reinsurance: enterprise application development, SQL/Oracle, production support, troubleshooting, documentation, performance optimization.
+- Co-op Refinery Complex: Power BI, SSRS, automation, reporting, prototype development.
+- SGI: enterprise IT support, troubleshooting, user support.
+- SLGA: junior programmer analyst experience, SQL, Oracle, application support.
+
+RELEVANT PROJECTS
+- AI Job Discovery Platform: Python automation, job extraction, structured data processing.
+- AI Resume Customizer: Python, prompt engineering, structured resume generation.
+- Document Search and Retrieval Prototype: embeddings, vector similarity, RAG concepts.
+
+SKILLS TO REMOVE OR DEPRIORITIZE
+- Skills unrelated to the target job should be removed or moved lower.
+
+UNSUPPORTED REQUIREMENTS
+- Any job requirements not clearly supported by the master resume should not be added.
+""".strip()
+
+    for attempt in range(3):
+        prompt = f"""
+You are a strict resume filtering assistant.
+
+Create a shorter, job-focused version of the candidate's master resume.
+
+Use point form only.
+
+Rules:
+- Use only information clearly supported by the master resume.
+- Do not invent skills, tools, job titles, employers, dates, certifications, or achievements.
+- Remove skills that are unnecessary for the target job.
+- Keep transferable skills if they are useful for the job.
+- Do not add required job skills unless they appear in the master resume.
+- If the job asks for a missing skill, list it under UNSUPPORTED REQUIREMENTS.
+- Keep the candidate's real background realistic.
+- Do not overstate seniority or specialization.
+- Do not use JSON.
+- Do not use markdown tables.
+- Use clear section headings and bullet points.
+
+Use this structure:
+
+TARGET POSITIONING
+- ...
+
+RELEVANT SUMMARY POINTS
+- ...
+
+RELEVANT SKILLS
+- ...
+
+RELEVANT EXPERIENCE TO EMPHASIZE
+- ...
+
+RELEVANT PROJECTS
+- ...
+
+LEADERSHIP OR VOLUNTEER RELEVANCE
+- ...
+
+SKILLS TO REMOVE OR DEPRIORITIZE
+- ...
+
+UNSUPPORTED REQUIREMENTS
+- ...
+
+MASTER RESUME:
+{master_resume_text[:10000]}
+
+TARGET JOB POSTING:
+{job_posting_text[:6000]}
+"""
+
+        response = chat(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            options={
+                "temperature": 0,
+                "top_p": 0.1,
+                "seed": 42 + attempt,
+                "num_predict": 1200,
+                "num_ctx": 12000,
+            },
+        )
+
+        raw_response = response["message"]["content"].strip()
+
+        if not raw_response:
+            print(f"Resume summary attempt {attempt + 1}: empty response")
+            continue
+
+        if len(raw_response) < 200:
+            print(f"Resume summary attempt {attempt + 1}: response too short")
+            print(raw_response)
+            continue
+
+        return raw_response
+
+    print("WARNING: Resume summary agent failed. Using fallback.")
+    return fallback
+
 def generate_headline_section(
     master_resume_text: str,
     job_posting_text: str,
     model: str = "llama3.1:8b",
-) -> dict:
+) -> str:
     prompt = f"""
-You are a strict resume customization assistant.
+You are a resume headline writer.
 
-Generate ONLY the resume HEADLINE section.
-
-The headline is the short line under the candidate's name.
+Write one short resume headline for the candidate.
 
 Rules:
-- Tailor the headline to the target job posting.
-- Use only skills, roles, and experience clearly supported by the master resume.
-- Do not invent technologies, tools, certifications, job titles, or industries.
-- Keep it short: 6 to 12 words.
-- Use professional resume headline style.
-- Use vertical bars to separate themes.
-- Do not use a full sentence.
-- Do not use first person.
-- Do not include location, email, phone number, or contact details.
-- Return valid JSON only.
-- Do not include Markdown or explanations.
-
-Good examples:
-
-For a data developer job:
-{{
-  "headline": "Data Developer | SQL | Reporting | Enterprise Data Solutions"
-}}
-
-For a software developer job:
-{{
-  "headline": "Software Developer | .NET | SQL | Enterprise Applications"
-}}
-
-For a technical analyst job:
-{{
-  "headline": "Technical Analyst | Business Systems | Production Support"
-}}
-
-For an AI automation job:
-{{
-  "headline": "AI Automation Developer | Python | Local LLM Workflows"
-}}
-
-Return exactly this JSON structure:
-
-{{
-  "headline": ""
-}}
+- Return only the headline text.
+- Do not return JSON.
+- Do not use Markdown.
+- Do not explain.
+- Maximum 12 words.
+- Use only facts supported by the master resume.
+- Use the job posting only to decide relevance.
+- Do not invent job titles, certifications, skills, or experience.
 
 MASTER RESUME:
 {master_resume_text}
 
-TARGET JOB POSTING:
+JOB POSTING:
 {job_posting_text}
 """
 
     response = chat(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
-        format="json",
+        messages=[
+            {
+                "role": "system",
+                "content": "Return one short resume headline only.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
         options={
-            "temperature": 0.2,
+            "temperature": 0.1,
+            "num_ctx": 8192,
+            "num_predict": 80,
         },
     )
 
-    content = response["message"]["content"]
+    result = response.message.content.strip()
 
-    try:
-        result = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise ValueError(
-            f"Model returned invalid JSON:\n{content}"
-        ) from error
+    if not result:
+        return "Software Developer | Systems Integration | AI Automation"
 
-    if "headline" not in result:
-        raise ValueError(
-            f"Missing 'headline' key:\n{content}"
-        )
-
-    headline = result["headline"]
-
-    if not isinstance(headline, str) or not headline.strip():
-        raise ValueError("Headline is empty or invalid.")
-
-    return {
-        "headline": headline.strip()
-    }
+    return result
 
 def generate_experience_section(
     master_resume_text: str,
@@ -1353,36 +1449,26 @@ def generate_professional_summary(
     model: str = "llama3.1:8b",
 ) -> str:
     prompt = f"""
-You are a strict resume-writing assistant.
+You are a professional resume writer.
 
-Write ONLY a professional summary for the candidate's customized resume.
+Write a professional summary for the candidate's customized resume.
 
-SOURCE RULES:
-- The master resume is the only source of truth about the candidate.
-- Use the job posting only to determine relevance.
-- Do not invent skills, technologies, experience, metrics, or achievements.
-- Do not summarize the job posting.
-- Do not return job details, requirements, benefits, or company information.
-
-SUMMARY RULES:
+Rules:
+- Return plain text only.
+- Do not return JSON.
+- Do not use Markdown.
+- Do not explain.
 - Write one paragraph.
-- Use 3 to 4 sentences.
-- Keep it between 60 and 100 words.
-- Emphasize the candidate's most relevant experience and strengths.
-- Do not use first-person pronouns.
-- Do not use headings.
-- Return valid JSON only.
-
-Return exactly this structure:
-
-{{
-  "professional_summary": ""
-}}
+- Use 3 sentences.
+- Keep it under 90 words.
+- Use only facts supported by the master resume.
+- Use the job posting only to decide what to emphasize.
+- Do not invent skills, job titles, certifications, metrics, or experience.
 
 MASTER RESUME:
 {master_resume_text}
 
-TARGET JOB POSTING:
+JOB POSTING:
 {job_posting_text}
 """
 
@@ -1391,41 +1477,31 @@ TARGET JOB POSTING:
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You generate customized resume professional summaries. "
-                    "Never summarize the job posting itself."
-                ),
+                "content": "Return only one professional resume summary paragraph.",
             },
             {
                 "role": "user",
                 "content": prompt,
             },
         ],
-        format="json",
         options={
             "temperature": 0.1,
+            "num_ctx": 8192,
+            "num_predict": 300,
         },
     )
 
-    raw_response = response.message.content
+    result = response.message.content.strip()
 
-    try:
-        data = json.loads(raw_response)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            "Professional summary agent returned invalid JSON:\n"
-            f"{raw_response}"
-        ) from exc
-
-    summary = data.get("professional_summary")
-
-    if not isinstance(summary, str) or not summary.strip():
-        raise ValueError(
-            "Missing or invalid 'professional_summary' key:\n"
-            f"{json.dumps(data, indent=2, ensure_ascii=False)}"
+    if not result:
+        return (
+            "Software developer with experience in enterprise systems, data processing, "
+            "automation, and technical support. Skilled in translating business needs "
+            "into practical technical solutions using programming, databases, reporting, "
+            "and AI-assisted workflows."
         )
 
-    return summary.strip()
+    return result
 
 def clean_json_response(raw_text: str) -> str:
     raw_text = raw_text.strip()
@@ -1588,12 +1664,11 @@ JOB_POSTING_END>>>
 def summarize_job_posting(
     webpage_text: str,
     model: str = "llama3.1:8b",
-) -> dict:
+) -> str:
     prompt = f"""
-You are a job-posting extraction agent.
+You are a job-posting summarization assistant.
 
-Analyze the webpage content and extract only information related to one
-specific job opportunity.
+Analyze the webpage content and summarize only one specific job opportunity.
 
 The webpage content may contain:
 - Navigation menus
@@ -1606,43 +1681,21 @@ The webpage content may contain:
 - Accessibility text
 - Unrelated job listings
 
-Ignore all unrelated webpage content.
+Ignore unrelated webpage content.
+
+Write a short plain-text summary of the job posting.
 
 Rules:
+- Do not return JSON.
+- Do not use Markdown.
+- Do not use bullet points.
+- Do not include explanations about your process.
 - Do not invent missing information.
-- Use an empty string for missing text fields.
-- Use an empty list for missing list fields.
-- Keep qualifications and responsibilities concise.
-- Preserve important technologies, years of experience, education,
-  location, work model, salary, and employment type.
-- Remove duplicate information.
-- Return valid JSON only.
-- Do not include Markdown, commentary, or explanations.
-
-Return exactly this JSON structure:
-
-{{
-  "job_title": "",
-  "company": "",
-  "location": "",
-  "work_model": "",
-  "employment_type": "",
-  "department": "",
-  "posting_date": "",
-  "closing_date": "",
-  "salary": "",
-  "job_summary": "",
-  "responsibilities": [],
-  "required_qualifications": [],
-  "preferred_qualifications": [],
-  "technical_skills": [],
-  "soft_skills": [],
-  "education": [],
-  "experience_requirements": [],
-  "certifications": [],
-  "benefits": [],
-  "keywords": []
-}}
+- Summarize into simple sentences.
+- Keep it concise.
+- Include job title, company, location, employment type, salary, main responsibilities, required skills, education, and experience when available.
+- Do not copy long paragraphs from the job posting.
+- Maximum 250 words.
 
 WEBPAGE CONTENT:
 {webpage_text}
@@ -1652,25 +1705,25 @@ WEBPAGE CONTENT:
         model=model,
         messages=[
             {
+                "role": "system",
+                "content": (
+                    "You summarize job postings into short plain text. "
+                    "Do not return JSON or Markdown."
+                ),
+            },
+            {
                 "role": "user",
                 "content": prompt,
-            }
+            },
         ],
-        format="json",
         options={
             "temperature": 0.1,
+            "num_ctx": 8192,
+            "num_predict": 1024,
         },
     )
 
-    try:
-        result = json.loads(response.message.content)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            "The job summarization agent returned invalid JSON.\n"
-            f"Raw response:\n{response.message.content}"
-        ) from exc
-
-    return result
+    return response.message.content.strip()
 
 
 def generate_resume_from_url(
@@ -1688,6 +1741,8 @@ def generate_resume_from_url(
 
     log("Step 1: Loading base resume data...")
     resume_data = sample_resume_data()
+
+
 
     log("Step 2: Reading job webpage...")
     webpage_html = get_html_playwright(job_url)
@@ -1729,14 +1784,25 @@ def generate_resume_from_url(
     if not master_resume_text.strip():
         raise ValueError("Master resume text is empty.")
 
+    log("")
+
+    log("step 5.1: Summarizing master resume for job...")
+    resume_brief = summarize_resume_for_job(
+    master_resume_text=master_resume_text,
+    job_posting_text=job_posting_text,
+    model=model,)
+    
+    master_resume_text=resume_brief
+
+    log("")
+
     log("Step 6: Generating headline...")
-    headline_result = generate_headline_section(
+
+    resume_data["headline"] = generate_headline_section(
         master_resume_text=master_resume_text,
         job_posting_text=job_posting_text,
         model=model,
     )
-
-    resume_data["headline"] = headline_result["headline"]
 
     log("Headline:")
     log(resume_data["headline"])
@@ -1814,31 +1880,9 @@ def generate_resume_from_url(
 
 
 def main():
+    print(" This script is intended to be run as part of a PyQt6 GUI application.")
     
-    resume_data = sample_resume_data()
-    webpagehtml = get_html_playwright("https://fccfac.wd3.myworkdayjobs.com/en-US/careers-carrieres/details/Product-Owner--Cyber-Security_R-1008647?id=R-1008647")
-    webpage_text = html_to_text(webpagehtml,UNWANTED_WEB_WORDS)
-    print(webpage_text)
-    jobinformation = summarize_job_posting(webpage_text=webpage_text, model="gemma3:12b")
-    master_resume_text = load_resume(r"Max_Gao_Master_Resume.pdf")
-    resume_data["professional_summary"] = generate_professional_summary(
-        master_resume_text=master_resume_text,
-        job_posting_text=jobinformation,
-        model="gemma3:12b"
-    )
-    print(json.dumps(resume_data["professional_summary"], indent=2))
-    resume_data["experience"] = generate_experience_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")["experience"]
-    print(json.dumps(resume_data["experience"], indent=2))
-    resume_data["skills"] = generate_skills_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")
-    print(json.dumps(resume_data["skills"], indent=2))
-    resume_data["projects"] = generate_projects_section(master_resume_text=master_resume_text, job_posting_text=jobinformation, model="gemma3:12b")["projects"]
-    print(json.dumps(resume_data["projects"], indent=2))
-    output_path = generate_resume_pdf(
-        resume_data=resume_data,
-        output_filename="sample_resume_template.pdf",
-    )
 
-    print(f"Resume PDF created successfully:\n{output_path}")
 
 
 if __name__ == "__main__":
