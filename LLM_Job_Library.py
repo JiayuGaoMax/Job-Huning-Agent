@@ -208,6 +208,11 @@ For each job:
 
 
 def rank_jobs_with_Gemini(Gemini_client, jobs_text, resume_text, max_retries=5):
+    MODELS = [
+        "gemini-3.8-flash",       # Primary: latest high-speed, agentic workhorse
+        "gemini-3.5-flash",       # Fallback 1: strong reasoning at low latency
+
+    ]
     prompt = f"""
 You are a strict job ranking agent.
 
@@ -246,26 +251,30 @@ For each job:
 
     last_error = None
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = Gemini_client.models.generate_content(
-                model="gemini-3.5-flash",
-                contents=prompt
-            )
+    for model_name in MODELS:
+            print(f"\n--- Attempting model: {model_name} ---")
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = Gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
 
-            if response and response.text and response.text.strip():
-                return response.text
+                    if response and response.text and response.text.strip():
+                        return response.text
 
-            raise ValueError("Gemini returned empty response.")
+                    raise ValueError(f"Empty response returned from model {model_name}.")
 
-        except Exception as e:
-            last_error = e
-            wait_time = (2 ** attempt) + random.uniform(0, 1)
+                except Exception as e:
+                    last_error = e
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
 
-            print(f"Gemini attempt {attempt} failed: {e}")
+                    print(f"[{model_name}] attempt {attempt}/{max_retries} failed: {e}")
 
-            if attempt < max_retries:
-                print(f"Retrying in {wait_time:.1f} seconds...")
-                time.sleep(wait_time)
-
+                    if attempt < max_retries:
+                        print(f"Retrying {model_name} in {wait_time:.1f} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"Exhausted all {max_retries} attempts for {model_name}. Switching to next model...")
+                        
     return f"# Gemini Ranking Failed\n\nError: {last_error}"

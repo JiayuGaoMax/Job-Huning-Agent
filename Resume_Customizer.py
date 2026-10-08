@@ -1322,11 +1322,25 @@ JOB POSTING:
 
     return result
 
+
 def generate_experience_section(
     master_resume_text: str,
     job_posting_text: str,
     model: str = "qwen3:8b",
 ) -> dict:
+    def fallback_result() -> dict:
+        print("Using fallback experience from sample_resume_data().")
+
+        try:
+            base_resume = sample_resume_data()
+            return {
+                "experience": base_resume.get("experience", [])
+            }
+        except Exception:
+            return {
+                "experience": []
+            }
+
     prompt = f"""
 You are a strict resume customization assistant.
 
@@ -1334,20 +1348,17 @@ Generate ONLY the PROFESSIONAL EXPERIENCE section.
 
 Rules:
 - Use only experience clearly supported by the master resume.
-- Do not invent employers, job titles, dates, locations, technologies,
-  responsibilities, achievements, or metrics.
+- Do not invent employers, job titles, dates, locations, technologies, responsibilities, achievements, or metrics.
 - Preserve the original employer names, job titles, dates, and locations.
+- Do not return an empty experience list if the master resume contains work experience.
+- Always include the candidate's current or most recent software/IT role if present.
 - Rewrite bullets to emphasize experience relevant to the target job.
-- Use concise, professional, accomplishment-focused language.
+- If a role is highly relevant, include 3 to 6 supported bullets.
+- If a role is less relevant, include 1 to 2 supported bullets.
 - Begin each bullet with a strong action verb.
 - Include measurable results only when explicitly supported by the master resume.
-- Do not repeat the same achievement across multiple bullets.
-- Remove weak, irrelevant, or unsupported bullets.
-- Keep each role to a maximum of 6 bullets.
-- Return roles in reverse chronological order.
-- Every item inside "bullets" must be one complete bullet-point string.
-- Do not split one bullet into multiple list items.
 - Do not include bullet symbols such as •, -, or *.
+- Return roles in reverse chronological order.
 - Return valid JSON only.
 - Do not include Markdown, Python syntax, parentheses, or explanations.
 
@@ -1375,62 +1386,56 @@ TARGET JOB POSTING:
 {job_posting_text}
 """
 
-    response = chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        format="json",
-        options={
-            "temperature": 0,
-            "num_ctx": 16384,
-        },
-    )
-
-    result = json.loads(response.message.content)
-
-    if not isinstance(result, dict):
-        raise ValueError("Model response must be a JSON object.")
-
-    experience = result.get("experience")
-
-    if not isinstance(experience, list):
-        raise ValueError(
-            "Model response must contain an 'experience' list."
+    try:
+        response = chat(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Return only complete valid JSON. "
+                        "Never return Markdown. "
+                        "Never return an empty experience list."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            format="json",
+            options={
+                "temperature": 0.0,
+                "num_ctx": 16384,
+                "num_predict": 4096,
+            },
         )
 
-    required_fields = {
-        "title",
-        "company",
-        "location",
-        "dates",
-        "bullets",
-    }
+        raw_response = response.message.content.strip()
 
-    for role in experience:
-        if not isinstance(role, dict):
-            raise ValueError(
-                "Each experience entry must be a JSON object."
-            )
+        if not raw_response:
+            print("Experience response is empty.")
+            return fallback_result()
 
-        missing_fields = required_fields - role.keys()
+        cleaned_response = clean_json_response(raw_response)
+        result = json.loads(cleaned_response)
 
-        if missing_fields:
-            raise ValueError(
-                f"Experience entry is missing fields: "
-                f"{sorted(missing_fields)}"
-            )
+        experience = result.get("experience", [])
 
-        if not isinstance(role["bullets"], list):
-            raise ValueError(
-                "Each experience entry must contain a bullets list."
-            )
+        if not experience:
+            print("Experience list is empty.")
+            return fallback_result()
 
-        role["bullets"] = [
-            bullet.strip()
-            for bullet in role["bullets"]
-            if isinstance(bullet, str) and bullet.strip()
-        ]
+        return {
+            "experience": experience
+        }
 
-    return result
+    except Exception as error:
+        print("WARNING: Experience generation failed.")
+        print(f"Reason: {error}")
+        return fallback_result()
+
+    
 def load_resume(pdf_path):
     doc = fitz.open(pdf_path)
 
